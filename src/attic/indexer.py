@@ -17,6 +17,7 @@ sweep, so leftovers never accumulate.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
 import time
@@ -39,8 +40,20 @@ logger = logging.getLogger("attic")
 EmbedderFactory = Callable[[Config], EmbeddingProvider]
 
 
-class ModelChanged(RuntimeError):
+class SettingsChanged(RuntimeError):
     pass
+
+
+def _index_settings(cfg: Config) -> dict[str, object]:
+    """Settings that shape what is stored. Changing any of them makes the existing
+    index inconsistent with new writes (vectors from two models are not comparable;
+    old chunks keep their old size or masking), so a change requires a rebuild."""
+    return {
+        "embedding_model": cfg.embedding_model,
+        "chunk_size": cfg.chunk_size,
+        "chunk_overlap": cfg.chunk_overlap,
+        "mask_sensitive": cfg.mask_sensitive,
+    }
 
 
 @dataclass
@@ -187,7 +200,7 @@ class Indexer:
         with self.lock:
             if self.cfg.low_priority and not dry_run:
                 _lower_priority()
-            self._check_model(rebuild and not dry_run)
+            self._check_settings(rebuild and not dry_run)
             report = Report(dry_run=dry_run)
             plan = self.plan()
             if not dry_run:
@@ -217,19 +230,24 @@ class Indexer:
             logger.info("sync: %s", report.summary())
             return report
 
-    def _check_model(self, rebuild: bool) -> None:
-        stored = self.manifest.get_meta("embedding_model")
+    def _check_settings(self, rebuild: bool) -> None:
+        current = _index_settings(self.cfg)
+        raw = self.manifest.get_meta("index_settings")
+        stored = json.loads(raw) if raw else None
         if rebuild:
             self.store.reset()
             self.manifest.remove(self.manifest.rows().keys())
             self.manifest.bump_generation()
-        elif stored and stored != self.cfg.embedding_model:
-            # Vectors from two models are not comparable; mixing them silently ruins search.
-            raise ModelChanged(
-                f"The index was built with {stored!r} but the config now says "
-                f"{self.cfg.embedding_model!r}. Run `attic sync --rebuild` to re-embed "
-                "everything with the new model."
+        elif stored is not None and stored != current:
+            changed = ", ".join(
+                f"{k} {stored.get(k)!r} -> {v!r}" for k, v in current.items()
+                if stored.get(k) != v
             )
+            raise SettingsChanged(
+                f"Index settings changed since the index was built ({changed}). Run "
+                "`attic sync --rebuild` to re-index everything with the new settings."
+            )
+        self.manifest.set_meta("index_settings", json.dumps(current, sort_keys=True))
         self.manifest.set_meta("embedding_model", self.cfg.embedding_model)
 
     def _sweep_orphans(self, stored: set[str]) -> int:
@@ -297,7 +315,9 @@ class Indexer:
             except OSError:
                 report.skipped_busy += 1
                 continue
-            text = sanitize(text).strip()
+            if self.cfg.mask_sensitive:
+                text = sanitize(text)
+            text = text.strip()
             file_chunks = self._chunk(info.path, doc_id, text) if text else []
             if not file_chunks:
                 new_rows.append(Row(key, info.size, info.mtime_ns, sha, None, 0, "empty"))

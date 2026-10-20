@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=69"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,6 +7,8 @@ name = "attic"
 version = "0.1.0"
 description = "Keep a local, always-current semantic index of the files on your computer, searchable from Claude via MCP. Built on kuhaku."
 readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = [
     # attic reaches into ChromaVectorStore's collection for upsert/delete (see

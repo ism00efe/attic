@@ -44,8 +44,10 @@ Skipped automatically:
   `id_rsa*`, `*secret*`, `credentials*.json`, password databases, ...
 - media and archives (not a supported type)
 
-Card numbers, tokens, e-mail addresses, IP addresses, phone numbers and Turkish ID
-numbers are masked before anything is embedded or stored (kuhaku's sanitizer).
+Optionally, `mask_sensitive = true` masks e-mail addresses, phone numbers, card
+numbers, tokens, IP addresses and Turkish ID numbers before anything is embedded or
+stored (kuhaku's sanitizer). It is off by default: this is a private index of your own
+files, and masking makes questions like "what was X's phone number" unanswerable.
 
 Not covered yet: scanned PDFs (no OCR) and images.
 
@@ -113,7 +115,8 @@ All keys except `roots` are optional; `attic init` writes a commented example.
 | `skip_hidden` | `true` | skip dot-folders (credentials stay excluded either way) |
 | `respect_gitignore` | `true` | |
 | `max_file_mb` | `20` | |
-| `embedding_model` | `intfloat/multilingual-e5-small` | changing it needs `attic sync --rebuild` |
+| `mask_sensitive` | `false` | mask e-mails, phone/card/ID numbers, tokens, IPs |
+| `embedding_model` | `intfloat/multilingual-e5-small` | |
 | `embedding_device` | `auto` | `auto`, `cuda`, `cpu` |
 | `chunk_size` / `chunk_overlap` | `1000` / `150` | characters |
 | `batch_files` | `32` | files embedded per batch |
@@ -121,6 +124,10 @@ All keys except `roots` are optional; `attic init` writes a commented example.
 | `low_priority` | `true` | run syncs at below-normal CPU priority |
 | `watch_debounce_seconds` | `300` | quiet time before a watch-triggered sync |
 | `retrieval` | `hybrid` | `hybrid` (vector + keyword) or `dense` |
+
+Changing `embedding_model`, `chunk_size`, `chunk_overlap` or `mask_sensitive` after the
+first index makes the old and new chunks inconsistent, so attic stops and asks for
+`attic sync --rebuild`.
 | `data_dir` | `~/.attic` | index, manifest, lock and log |
 
 ## Development
@@ -132,3 +139,7 @@ pytest
 
 The tests run offline: a hashing fake replaces the embedding model and Chroma runs in a
 temp directory, so they need no GPU and no model download.
+
+## License
+
+Apache-2.0, see [LICENSE](https://github.com/ism00efe/attic/blob/main/LICENSE).

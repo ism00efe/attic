@@ -170,14 +170,14 @@ def main(argv: list[str] | None = None) -> int:
         print("No `roots` in the config: nothing to index.", file=sys.stderr)
         return 2
 
-    from .indexer import ModelChanged
+    from .indexer import SettingsChanged
     from .lock import WriterBusy
 
     handlers = {"sync": _cmd_sync, "watch": _cmd_watch, "serve": _cmd_serve,
                 "search": _cmd_search, "status": _cmd_status}
     try:
         return handlers[args.command](cfg, args)
-    except (WriterBusy, ModelChanged) as exc:
+    except (WriterBusy, SettingsChanged) as exc:
         print(exc, file=sys.stderr)
         return 3
 

@@ -2,7 +2,7 @@ import os
 
 import pytest
 
-from attic.indexer import ModelChanged
+from attic.indexer import SettingsChanged
 from attic.lock import WriterBusy
 
 
@@ -206,20 +206,32 @@ def test_only_one_writer_at_a_time(root, make_indexer):
         first.lock.release()
 
 
-def test_changing_model_requires_rebuild(root, make_indexer):
+@pytest.mark.parametrize("change", [
+    {"embedding_model": "another/model"},
+    {"chunk_size": 300},
+    {"mask_sensitive": True},
+])
+def test_changing_index_settings_requires_rebuild(root, make_indexer, change):
     _write(root, "a.md", "x")
     make_indexer().sync()
-    idx = make_indexer(embedding_model="another/model")
-    with pytest.raises(ModelChanged):
+    idx = make_indexer(**change)
+    with pytest.raises(SettingsChanged):
         idx.sync()
     r = idx.sync(rebuild=True)
     assert r.indexed == 1 and idx.store.count() == 1
 
 
-def test_sensitive_values_are_masked_before_embedding(root, make_indexer):
+def test_masking_is_off_by_default(root, make_indexer):
+    _write(root, "contacts.txt", "Ayse: ayse@example.com 0532 123 45 67")
+    idx = make_indexer()
+    idx.sync()
+    assert "ayse@example.com" in " ".join(c.text for c in idx.store.iter_chunks())
+
+
+def test_mask_sensitive_masks_before_embedding(root, make_indexer):
     token = "ghp_" + "abcdefghijklmnopqrstuvwxyz0123456789"
     _write(root, "contacts.txt", f"Card 4111 1111 1111 1111 and token {token}")
-    idx = make_indexer()
+    idx = make_indexer(mask_sensitive=True)
     idx.sync()
     stored = " ".join(c.text for c in idx.store.iter_chunks())
     assert "4111 1111" not in stored and "ghp_abcdef" not in stored

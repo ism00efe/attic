@@ -27,6 +27,10 @@ class Config:
     skip_hidden: bool = True
     respect_gitignore: bool = True
     max_file_mb: float = 20.0
+    # Mask e-mails, phone numbers, card numbers, tokens, IPs and Turkish ID numbers
+    # (kuhaku's sanitizer) before indexing. Off by default: this is a private index of
+    # your own files, and masking makes "what was X's phone number" unanswerable.
+    mask_sensitive: bool = False
 
     embedding_model: str = "intfloat/multilingual-e5-small"
     embedding_device: str = "auto"  # auto | cuda | cpu
@@ -106,6 +110,9 @@ exclude = [
 # skip_hidden = true
 # respect_gitignore = true
 # max_file_mb = 20
+
+# Mask e-mails, phone/card/ID numbers, tokens and IPs before indexing.
+# mask_sensitive = false
 
 # embedding_model = "intfloat/multilingual-e5-small"
 # embedding_device = "auto"          # auto | cuda | cpu
