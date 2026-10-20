@@ -68,8 +68,10 @@ Python 3.11+.
    pip install git+https://github.com/ism00efe/attic
    ```
 
-The first run downloads the embedding model (`intfloat/multilingual-e5-small`, about
-0.5 GB, multilingual including Turkish).
+The first run downloads the embedding model,
+[EmbeddingGemma 2](https://huggingface.co/google/embeddinggemma-2) (740M parameters,
+Apache-2.0, 100+ languages including Turkish, 8K-token context; runs in bfloat16 on the
+GPU).
 
 ## Use
 
@@ -134,8 +136,10 @@ All keys except `roots` are optional; `attic init` writes a commented example.
 | `respect_gitignore` | `true` | |
 | `max_file_mb` | `20` | |
 | `mask_sensitive` | `false` | mask e-mails, phone/card/ID numbers, tokens, IPs |
-| `embedding_model` | `intfloat/multilingual-e5-small` | |
+| `embedding_model` | `google/embeddinggemma-2` | changing it needs `--rebuild` |
+| `embedding_dims` | full (768) | Matryoshka truncation; changing it needs `--rebuild` |
 | `embedding_device` | `auto` | `auto`, `cuda`, `cpu` |
+| `embedding_batch_size` | `16` | chunks per GPU batch; lower it if memory runs out |
 | `chunk_size` / `chunk_overlap` | `1000` / `150` | characters |
 | `batch_files` | `32` | files embedded per batch |
 | `pause_between_batches_seconds` | `0` | heat control for big runs |
@@ -147,9 +151,9 @@ All keys except `roots` are optional; `attic init` writes a commented example.
 Changing `chunk_size`, `chunk_overlap` or `mask_sensitive` later needs nothing special:
 the next sync re-reads every file and re-embeds only the ones whose chunks come out
 different (turning masking on, for example, only touches files that contain something
-to mask). Changing `embedding_model` is the exception: vectors from two models cannot
-be mixed, so every file must be embedded again. attic stops and asks you to run
-`attic sync --rebuild` when you are ready for that.
+to mask). Changing `embedding_model` or `embedding_dims` is the exception: vectors from
+two models or sizes cannot be mixed, so every file must be embedded again. attic stops
+and asks you to run `attic sync --rebuild` when you are ready for that.
 
 ## Development
 

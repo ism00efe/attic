@@ -29,6 +29,8 @@ from kuhaku.core.sanitization import sanitize
 from kuhaku.tools.rag import Chunk, Document, EmbeddingProvider, chunk_document
 
 from .config import Config
+from .embeddings import format_document
+from .embeddings import signature as embedding_signature
 from .ignore import FileInfo, Walker
 from .loaders import LoadError, load_text
 from .lock import WriterLock
@@ -121,11 +123,12 @@ class Report:
 
 def default_embedder(cfg: Config) -> EmbeddingProvider:
     from kuhaku.core.resolve.probes import torch_accelerator
-    from kuhaku.tools.rag import SentenceTransformerEmbeddings
+
+    from .embeddings import LocalEmbeddings
 
     device = cfg.embedding_device if cfg.embedding_device != "auto" else torch_accelerator()
-    logger.info("loading embedding model %s on %s", cfg.embedding_model, device)
-    return SentenceTransformerEmbeddings(cfg.embedding_model, device=device)
+    return LocalEmbeddings(cfg.embedding_model, device=device, dims=cfg.embedding_dims,
+                           batch_size=cfg.embedding_batch_size)
 
 
 def path_key(path: str) -> str:
@@ -256,20 +259,22 @@ class Indexer:
             return report
 
     def _check_model(self, rebuild: bool) -> None:
-        stored = self.manifest.get_meta("embedding_model")
+        current = embedding_signature(self.cfg.embedding_model, self.cfg.embedding_dims)
+        stored = self.manifest.get_meta("embedding_signature")
         if rebuild:
             self.store.reset()
             self.manifest.remove(self.manifest.rows().keys())
             self.manifest.bump_generation()
-        elif stored and stored != self.cfg.embedding_model:
-            # Vectors from two models are not comparable (often not even the same
-            # length), so every file has to be embedded again: the one change that
-            # cannot be done incrementally.
+        elif stored and stored != current:
+            # Vectors from two models, sizes or prompt formats are not comparable, so
+            # every file has to be embedded again: the one change that cannot be done
+            # incrementally.
             raise SettingsChanged(
-                f"The index was built with {stored!r} but the config now says "
-                f"{self.cfg.embedding_model!r}. Changing the model means re-embedding "
+                f"The index was built with {stored!r} but the config now gives "
+                f"{current!r}. Changing the embedding model or size means re-embedding "
                 "every file: run `attic sync --rebuild` when you are ready for that."
             )
+        self.manifest.set_meta("embedding_signature", current)
         self.manifest.set_meta("embedding_model", self.cfg.embedding_model)
 
     def _queue_recheck(self, plan: Plan) -> None:
@@ -372,9 +377,11 @@ class Indexer:
                 if old and old.doc_id:
                     stale_doc_ids.append(old.doc_id)
                 continue
-            header = f"File: {info.path.parent.name}/{info.path.name}\n"
+            title = f"{info.path.parent.name}/{info.path.name}"
             chunks.extend(file_chunks)
-            embed_texts.extend(header + c.text for c in file_chunks)
+            embed_texts.extend(
+                format_document(self.cfg.embedding_model, title, c.text) for c in file_chunks
+            )
             new_rows.append(Row(key, info.size, info.mtime_ns, sha, doc_id,
                                 len(file_chunks), "ok"))
             if old and old.doc_id and old.doc_id != doc_id:

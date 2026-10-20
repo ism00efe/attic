@@ -32,8 +32,11 @@ class Config:
     # your own files, and masking makes "what was X's phone number" unanswerable.
     mask_sensitive: bool = False
 
-    embedding_model: str = "intfloat/multilingual-e5-small"
+    # Changing the model or its vector size later means re-embedding every file.
+    embedding_model: str = "google/embeddinggemma-2"
+    embedding_dims: int | None = None  # None = the model's full size; else Matryoshka cut
     embedding_device: str = "auto"  # auto | cuda | cpu
+    embedding_batch_size: int = 16
     chunk_size: int = 1000
     chunk_overlap: int = 150
 
@@ -114,8 +117,11 @@ exclude = [
 # Mask e-mails, phone/card/ID numbers, tokens and IPs before indexing.
 # mask_sensitive = false
 
-# embedding_model = "intfloat/multilingual-e5-small"
+# Changing the model or embedding_dims later re-embeds every file (attic sync --rebuild).
+# embedding_model = "google/embeddinggemma-2"
+# embedding_dims = 768               # omit for the model's full size
 # embedding_device = "auto"          # auto | cuda | cpu
+# embedding_batch_size = 16
 
 # Heat control for big runs: a pause after every batch keeps the GPU from running
 # flat out. 0 = as fast as possible.
