@@ -25,8 +25,11 @@ Everything stays on your machine. The embedding model runs locally (GPU if avail
   missing from search because of a crash, and leftovers are swept at the start of every
   sync. (The tests simulate crashes at each step.)
 - **One writer at a time**, enforced by an OS file lock that cannot go stale.
-- **Watch mode** syncs once at start, then again whenever the folders have changed and
-  been quiet for a while (5 minutes by default).
+- **Unchanged text is never re-embedded.** A touched or re-saved file whose extracted
+  text is the same keeps its vectors.
+- **Runs in the background.** After the first `attic sync`, a watcher starts and is set
+  to start at every login (Windows). It syncs whenever the folders have changed and been
+  quiet for a while (5 minutes by default). `attic autostart off` turns it off.
 
 ## What gets indexed
 
@@ -76,12 +79,28 @@ attic sync --dry-run       # how many files would be indexed; embeds nothing
 attic sync                 # first full index (the only heavy run), then incremental
 attic search "internship report"
 attic status               # files, chunks, last sync; --failed lists unparseable files
-attic watch                # keep syncing as files change
 ```
 
 The first `attic sync` is the only long, GPU-heavy run. To keep it cooler, set
 `pause_between_batches_seconds` in the config (e.g. `2`): the work then runs in bursts
 instead of flat out. Stop it any time; running it again continues.
+
+### Background watcher
+
+When the first `attic sync` finishes, attic starts `attic watch` in the background
+(no window) and registers it to start at every login, through the per-user Run key: no
+admin rights, and it is listed under Task Manager > Startup apps. At each start it syncs
+whatever changed while it was off, which is incremental and quick.
+
+```bash
+attic autostart status     # on/off, running or not
+attic autostart off        # stop it and remove it from login; remembered
+attic autostart on         # register again and start it now
+attic stop                 # stop it for now; it starts again at next login
+```
+
+Autostart is implemented for Windows. On other systems, `attic watch` runs in the
+foreground; add it to your login items yourself.
 
 ## Connect to Claude
 
@@ -99,10 +118,9 @@ prints the entry to add under `mcpServers` in Claude Desktop's
 The server is read-only and only returns what is in the index; it has no tool that
 reads arbitrary paths, so excluded files stay out of reach.
 
-To keep the index fresh while Claude Desktop is open, change `serve` to
-`serve --watch` in that entry. Without it, run `attic watch` yourself or schedule
-`attic sync` (e.g. Windows Task Scheduler); a running server picks up another
-process's changes on its next search.
+The background watcher keeps the index fresh; the server picks up its changes on the
+next search. If you turned autostart off but want syncing while Claude Desktop is open,
+use `serve --watch` in that entry instead.
 
 ## Configuration
 
@@ -124,11 +142,14 @@ All keys except `roots` are optional; `attic init` writes a commented example.
 | `low_priority` | `true` | run syncs at below-normal CPU priority |
 | `watch_debounce_seconds` | `300` | quiet time before a watch-triggered sync |
 | `retrieval` | `hybrid` | `hybrid` (vector + keyword) or `dense` |
-
-Changing `embedding_model`, `chunk_size`, `chunk_overlap` or `mask_sensitive` after the
-first index makes the old and new chunks inconsistent, so attic stops and asks for
-`attic sync --rebuild`.
 | `data_dir` | `~/.attic` | index, manifest, lock and log |
+
+Changing `chunk_size`, `chunk_overlap` or `mask_sensitive` later needs nothing special:
+the next sync re-reads every file and re-embeds only the ones whose chunks come out
+different (turning masking on, for example, only touches files that contain something
+to mask). Changing `embedding_model` is the exception: vectors from two models cannot
+be mixed, so every file must be embedded again. attic stops and asks you to run
+`attic sync --rebuild` when you are ready for that.
 
 ## Development
 

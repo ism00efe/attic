@@ -206,19 +206,53 @@ def test_only_one_writer_at_a_time(root, make_indexer):
         first.lock.release()
 
 
-@pytest.mark.parametrize("change", [
-    {"embedding_model": "another/model"},
-    {"chunk_size": 300},
-    {"mask_sensitive": True},
-])
-def test_changing_index_settings_requires_rebuild(root, make_indexer, change):
+def test_changing_model_requires_explicit_rebuild(root, make_indexer):
     _write(root, "a.md", "x")
     make_indexer().sync()
-    idx = make_indexer(**change)
+    idx = make_indexer(embedding_model="another/model")
     with pytest.raises(SettingsChanged):
         idx.sync()
     r = idx.sync(rebuild=True)
     assert r.indexed == 1 and idx.store.count() == 1
+
+
+def test_turning_masking_on_re_embeds_only_files_it_changes(root, make_indexer, fake):
+    _write(root, "plain.md", "meeting notes about the roadmap")
+    _write(root, "contacts.txt", "Ayse ayse@example.com")
+    make_indexer().sync()
+    before = fake.texts_embedded
+
+    idx = make_indexer(mask_sensitive=True)
+    r = idx.sync()  # no rebuild needed
+    assert r.plan_recheck == 2
+    assert r.indexed == 1 and r.content_unchanged == 1
+    assert fake.texts_embedded == before + 1  # only contacts.txt
+    stored = " ".join(c.text for c in idx.store.iter_chunks())
+    assert "ayse@example.com" not in stored and idx.store.count() == 2
+    assert idx.sync().plan_recheck == 0  # settled
+
+
+def test_changing_chunk_size_re_chunks_everything_without_rebuild(root, make_indexer):
+    _write(root, "long.md", "\n\n".join(f"paragraph {i} " + "word " * 30 for i in range(6)))
+    idx = make_indexer()
+    idx.sync()
+    small = idx.store.count()
+    idx2 = make_indexer(chunk_size=600, chunk_overlap=50)
+    r = idx2.sync()
+    assert r.indexed == 1
+    assert idx2.store.count() < small
+    assert len(idx2.store.document_ids()) == 1  # old chunks gone
+
+
+def test_resaved_file_with_same_text_is_not_re_embedded(root, make_indexer, fake):
+    p = _write(root, "a.md", "same text")
+    idx = make_indexer()
+    idx.sync()
+    before = fake.texts_embedded
+    p.write_text("same text\n", encoding="utf-8")  # bytes differ, stripped text does not
+    _bump_mtime(p)
+    r = idx.sync()
+    assert r.content_unchanged == 1 and fake.texts_embedded == before
 
 
 def test_masking_is_off_by_default(root, make_indexer):

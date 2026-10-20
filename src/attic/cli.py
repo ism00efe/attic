@@ -20,9 +20,11 @@ def _setup_logging(cfg: Config | None, verbose: bool) -> None:
     root.setLevel(logging.DEBUG if verbose else logging.INFO)
     fmt = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
     # stderr only: in `serve`, stdout is the MCP channel and any stray print breaks it.
-    err = logging.StreamHandler(sys.stderr)
-    err.setFormatter(fmt)
-    root.addHandler(err)
+    # Under pythonw (the autostarted watcher) there is no stderr at all.
+    if sys.stderr is not None:
+        err = logging.StreamHandler(sys.stderr)
+        err.setFormatter(fmt)
+        root.addHandler(err)
     if cfg is not None:
         cfg.data_path.mkdir(parents=True, exist_ok=True)
         fh = RotatingFileHandler(cfg.data_path / "attic.log", maxBytes=2_000_000,
@@ -48,18 +50,35 @@ def _progress(done: int, total: int) -> None:
         print(file=sys.stderr)
 
 
+def _autostart(cfg: Config, args: argparse.Namespace, manifest=None):
+    from .autostart import Autostart
+    from .manifest import Manifest
+
+    manifest = manifest or Manifest(cfg.data_path / "manifest.db")
+    return Autostart(args.config_path, cfg.data_path, manifest)
+
+
 def _cmd_sync(cfg: Config, args: argparse.Namespace) -> int:
     from .indexer import Indexer
 
-    report = Indexer(cfg).sync(dry_run=args.dry_run, rebuild=args.rebuild, progress=_progress)
+    indexer = Indexer(cfg)
+    report = indexer.sync(dry_run=args.dry_run, rebuild=args.rebuild, progress=_progress)
     print(report.summary())
+    if not args.dry_run and _autostart(cfg, args, indexer.manifest).enable_after_first_sync():
+        print("Autostart on: `attic watch` now runs in the background and starts at every "
+              "login. `attic autostart off` turns it off.")
     return 0
 
 
 def _cmd_watch(cfg: Config, args: argparse.Namespace) -> int:
+    from .autostart import clear_pid, running_pid, write_pid
     from .indexer import Indexer
     from .watcher import Watcher
 
+    if running_pid(cfg.data_path) is not None:
+        print("attic watch is already running.", file=sys.stderr)
+        return 0
+    write_pid(cfg.data_path)
     stop = threading.Event()
     watcher = Watcher(Indexer(cfg), debounce_seconds=cfg.watch_debounce_seconds)
     thread = threading.Thread(target=watcher.run, args=(stop,), daemon=True)
@@ -71,6 +90,36 @@ def _cmd_watch(cfg: Config, args: argparse.Namespace) -> int:
     except KeyboardInterrupt:
         stop.set()
         thread.join(timeout=30)
+    finally:
+        clear_pid(cfg.data_path)
+    return 0
+
+
+def _cmd_autostart(cfg: Config, args: argparse.Namespace) -> int:
+    from .autostart import running_pid, supported
+
+    if not supported():
+        print("Autostart is only implemented for Windows. Elsewhere, add `attic watch` to "
+              "your login items yourself.", file=sys.stderr)
+        return 2
+    auto = _autostart(cfg, args)
+    if args.action == "on":
+        auto.enable()
+        print("Autostart on; the watcher is running.")
+    elif args.action == "off":
+        stopped = auto.disable()
+        print("Autostart off" + ("; the running watcher was stopped." if stopped else "."))
+    else:
+        state = "on" if auto.enabled() else ("off (by you)" if auto.opted_out() else "off")
+        running = "running" if running_pid(cfg.data_path) else "not running"
+        print(f"autostart: {state}; watcher: {running}")
+    return 0
+
+
+def _cmd_stop(cfg: Config, args: argparse.Namespace) -> int:
+    from .autostart import stop
+
+    print("Stopped the watcher." if stop(cfg.data_path) else "No watcher is running.")
     return 0
 
 
@@ -151,12 +200,18 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("status", help="index size and last sync")
     p.add_argument("--failed", action="store_true", help="list files that failed to parse")
 
+    p = sub.add_parser("autostart", help="run `attic watch` at login (Windows)")
+    p.add_argument("action", choices=["on", "off", "status"], nargs="?", default="status")
+
+    sub.add_parser("stop", help="stop the running background watcher")
+
     sub.add_parser("mcp-config", help="print the Claude Desktop config entry for attic")
 
     args = parser.parse_args(argv)
     if args.command == "init":
         return _cmd_init(args)
     cfg_path = Path(args.config).expanduser() if args.config else default_config_path()
+    args.config_path = cfg_path
     if args.command == "mcp-config":
         return _cmd_mcp_config(cfg_path)
 
@@ -174,7 +229,8 @@ def main(argv: list[str] | None = None) -> int:
     from .lock import WriterBusy
 
     handlers = {"sync": _cmd_sync, "watch": _cmd_watch, "serve": _cmd_serve,
-                "search": _cmd_search, "status": _cmd_status}
+                "search": _cmd_search, "status": _cmd_status,
+                "autostart": _cmd_autostart, "stop": _cmd_stop}
     try:
         return handlers[args.command](cfg, args)
     except (WriterBusy, SettingsChanged) as exc:

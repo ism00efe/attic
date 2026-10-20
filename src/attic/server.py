@@ -59,6 +59,14 @@ def serve(cfg: Config, *, watch: bool = False) -> None:
     searcher: Searcher
     stop = threading.Event()
     if watch:
+        from .autostart import running_pid
+
+        if running_pid(cfg.data_path) is not None:
+            # The background watcher already keeps the index current; a second one
+            # would only collide with it on the writer lock.
+            logger.info("serve: background watcher already running; not starting another")
+            watch = False
+    if watch:
         from .indexer import Indexer
         from .watcher import Watcher
 
