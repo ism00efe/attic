@@ -66,4 +66,5 @@ def test_local_embeddings_normalizes_truncates_and_ignores_default_prompts(tiny_
     plain = full._model.encode(["lentil soup"], prompt="")[0]
     ours = full.embed_documents(["lentil soup"])[0]
     norm = math.sqrt(sum(float(x) ** 2 for x in plain))
-    assert all(math.isclose(a, float(b) / norm, abs_tol=1e-5) for a, b in zip(ours, plain, strict=True))
+    pairs = zip(ours, plain, strict=True)
+    assert all(math.isclose(a, float(b) / norm, abs_tol=1e-5) for a, b in pairs)
